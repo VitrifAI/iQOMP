@@ -1,79 +1,55 @@
 import { create } from 'zustand';
 import type {
-  Vector3Data,
-  EulerData,
-  ModularDevice,
-  MonolithicDevice,
-  ActiveProp,
-  CustomProp,
-  CameraPreset,
-  CompareMode,
-  ReferencePropDef,
+  Vector3Data, EulerData, ModularDevice, MonolithicDevice,
+  ActiveProp, CustomProp, CameraPreset, CameraAnglePreset, CompareMode, ReferencePropDef,
 } from '@/types';
-import {
-  REFERENCE_PROP_DEFS,
-  MM_TO_UNIT,
-} from '@/types';
+import { REFERENCE_PROP_DEFS, MM_TO_UNIT, computeStackedY, DEVICE_SPECS } from '@/types';
 
 const v3 = (x: number, y: number, z: number): Vector3Data => ({ x, y, z });
 const euler = (x: number, y: number, z: number): EulerData => ({ x, y, z });
 
-// Helper to get default position for a new object
 const getDefaultPosition = (index: number): Vector3Data => {
   const spacing = 60 * MM_TO_UNIT;
   return v3((index - 1.5) * spacing, 0, 0);
 };
 
 interface AppState {
-  // Devices
   prime: ModularDevice;
   mid: ModularDevice;
   one: MonolithicDevice;
-
-  // Reference props
   activeProps: Record<string, ActiveProp>;
-
-  // Custom props
   customProps: CustomProp[];
-
-  // Camera
   cameraMode: 'preset' | 'free';
   cameraPreset: CameraPreset;
+  cameraAnglePreset: CameraAnglePreset;
   fov: number;
   cameraLocked: boolean;
-
-  // Overlay
   overlayImage: string | null;
   overlayOpacity: number;
   matchMode: boolean;
   calibrationDepth: number | null;
-
-  // Viewport aids
   gridEnabled: boolean;
   gridSpacing: 10 | 50 | 100;
   rulerEnabled: boolean;
   compareMode: CompareMode;
-
-  // Selection
   selectedObjectIds: string[];
-
-  // Locking
   lockedIds: string[];
+  cropGuidesEnabled: boolean;
 
-  // Actions
   toggleDevice: (device: 'prime' | 'mid' | 'one') => void;
   toggleComponent: (device: 'prime' | 'mid', component: 'charger' | 'holder') => void;
   toggleSeparate: (device: 'prime' | 'mid') => void;
   toggleProp: (propId: string) => void;
   setPropPreset: (propId: string, presetIndex: number) => void;
   setPropSlider: (propId: string, value: number) => void;
-  addCustomProp: (prop: Omit<CustomProp, 'id' | 'position' | 'rotation' | 'visible' | 'labelText' | 'showLabel'>) => void;
+  addCustomProp: (prop: Omit<CustomProp, 'id' | 'visible' | 'position' | 'rotation' | 'labelText' | 'showLabel' | 'stackMode' | 'material'>) => void;
   removeCustomProp: (id: string) => void;
   toggleCustomProp: (id: string) => void;
   setOverlayImage: (url: string | null) => void;
   setOverlayOpacity: (opacity: number) => void;
   setMatchMode: (active: boolean) => void;
   setCameraPreset: (preset: CameraPreset) => void;
+  setCameraAnglePreset: (preset: CameraAnglePreset) => void;
   setCameraMode: (mode: 'preset' | 'free') => void;
   setFov: (fov: number) => void;
   toggleGrid: () => void;
@@ -87,337 +63,193 @@ interface AppState {
   toggleObjectLock: (id: string) => void;
   setObjectLabel: (id: string, text: string) => void;
   toggleObjectLabel: (id: string) => void;
+  setObjectMaterial: (id: string, material: string) => void;
+  setObjectStackMode: (id: string, stackMode: boolean) => void;
+  snapToStack: (id: string) => void;
   lockCamera: (locked: boolean) => void;
   setCalibrationDepth: (depth: number | null) => void;
+  toggleCropGuides: () => void;
   resetScene: () => void;
 }
 
 const defaultModular: ModularDevice = {
-  visible: false,
-  chargerVisible: true,
-  holderVisible: true,
-  separate: false,
-  chargerPosition: v3(0, 0, 0),
-  chargerRotation: euler(0, 0, 0),
-  holderPosition: v3(0, 0, 0),
-  holderRotation: euler(0, 0, 0),
+  visible: false, chargerVisible: true, holderVisible: true, separate: false,
+  chargerPosition: v3(0,0,0), chargerRotation: euler(0,0,0),
+  holderPosition: v3(0,0,0), holderRotation: euler(0,0,0),
+  stackMode: false, material: '',
 };
 
 const defaultOne: MonolithicDevice = {
-  visible: false,
-  position: v3(0, 0, 0),
-  rotation: euler(0, 0, 0),
+  visible: false, position: v3(0,0,0), rotation: euler(0,0,0),
+  stackMode: false, material: '',
 };
 
 export const useAppStore = create<AppState>((set) => ({
-  // Initial state
-  prime: { ...defaultModular },
-  mid: { ...defaultModular },
-  one: { ...defaultOne },
-  activeProps: {},
-  customProps: [],
-  cameraMode: 'preset',
-  cameraPreset: 'threeQuarter',
-  fov: 45,
-  cameraLocked: false,
-  overlayImage: null,
-  overlayOpacity: 0.5,
-  matchMode: false,
-  calibrationDepth: null,
-  gridEnabled: true,
-  gridSpacing: 50,
-  rulerEnabled: false,
-  compareMode: null,
-  selectedObjectIds: [],
-  lockedIds: [],
+  prime: { ...defaultModular }, mid: { ...defaultModular }, one: { ...defaultOne },
+  activeProps: {}, customProps: [],
+  cameraMode: 'preset', cameraPreset: 'threeQuarter', cameraAnglePreset: 'threeQuarter',
+  fov: 45, cameraLocked: false, overlayImage: null, overlayOpacity: 0.5,
+  matchMode: false, calibrationDepth: null, gridEnabled: true, gridSpacing: 50,
+  rulerEnabled: false, compareMode: null, selectedObjectIds: [], lockedIds: [],
+  cropGuidesEnabled: false,
 
-  // Actions
-  toggleDevice: (device) =>
-    set((state) => {
-      if (device === 'one') {
-        return { one: { ...state.one, visible: !state.one.visible } };
-      }
-      const dev = state[device];
-      return { [device]: { ...dev, visible: !dev.visible } };
-    }),
+  toggleDevice: (device) => set((state) => {
+    if (device === 'one') return { one: { ...state.one, visible: !state.one.visible } };
+    const dev = state[device]; return { [device]: { ...dev, visible: !dev.visible } };
+  }),
 
-  toggleComponent: (device, component) =>
-    set((state) => {
-      const dev = state[device];
-      if (component === 'charger') {
-        return { [device]: { ...dev, chargerVisible: !dev.chargerVisible } };
-      }
-      return { [device]: { ...dev, holderVisible: !dev.holderVisible } };
-    }),
+  toggleComponent: (device, component) => set((state) => {
+    const dev = state[device];
+    if (component === 'charger') return { [device]: { ...dev, chargerVisible: !dev.chargerVisible } };
+    return { [device]: { ...dev, holderVisible: !dev.holderVisible } };
+  }),
 
-  toggleSeparate: (device) =>
-    set((state) => {
-      const dev = state[device];
-      const newSeparate = !dev.separate;
-      // When separating, move holder to the side
-      const chargerH = device === 'prime' ? 117.2 : 121.5;
-      const newHolderPos = newSeparate
-        ? v3(dev.chargerPosition.x + (chargerH + 30) * MM_TO_UNIT, dev.chargerPosition.y, dev.chargerPosition.z)
-        : v3(dev.chargerPosition.x, dev.chargerPosition.y, dev.chargerPosition.z);
-      return {
-        [device]: {
-          ...dev,
-          separate: newSeparate,
-          holderPosition: newHolderPos,
-        },
+  toggleSeparate: (device) => set((state) => {
+    const dev = state[device]; const newSeparate = !dev.separate;
+    const chargerH = device === 'prime' ? 117.2 : 121.5;
+    const newHolderPos = newSeparate
+      ? v3(dev.chargerPosition.x + (chargerH + 30) * MM_TO_UNIT, dev.chargerPosition.y, dev.chargerPosition.z)
+      : v3(dev.chargerPosition.x, dev.chargerPosition.y, dev.chargerPosition.z);
+    return { [device]: { ...dev, separate: newSeparate, holderPosition: newHolderPos } };
+  }),
+
+  toggleProp: (propId) => set((state) => {
+    const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId);
+    if (!def) return state;
+    const newProps = { ...state.activeProps };
+    const removedMeshIds: string[] = [];
+    if (newProps[propId]) {
+      delete newProps[propId]; removedMeshIds.push(`${propId}-prop`);
+      REFERENCE_PROP_DEFS.filter((d) => d.parent === propId).forEach((child) => {
+        if (newProps[child.id]) { delete newProps[child.id]; removedMeshIds.push(`${child.id}-prop`); }
+      });
+    } else {
+      const addProp = (d: ReferencePropDef) => {
+        if (newProps[d.id]) return;
+        const count = Object.keys(newProps).length;
+        newProps[d.id] = { defId: d.id, visible: true, currentDims: { ...d.defaultDims },
+          position: getDefaultPosition(count), rotation: euler(0,0,0), labelText: d.name, showLabel: true,
+          stackMode: false, material: '' };
       };
-    }),
+      if (def.parent) { const parentDef = REFERENCE_PROP_DEFS.find((d) => d.id === def.parent); if (parentDef) addProp(parentDef); }
+      addProp(def);
+    }
+    return { activeProps: newProps, selectedObjectIds: state.selectedObjectIds.filter((id) => !removedMeshIds.includes(id)),
+      lockedIds: state.lockedIds.filter((id) => !removedMeshIds.includes(id)) };
+  }),
 
-  toggleProp: (propId) =>
-    set((state) => {
-      const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId);
-      if (!def) return state;
+  setPropPreset: (propId, presetIndex) => set((state) => {
+    const prop = state.activeProps[propId]; if (!prop) return state;
+    const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId); if (!def || !def.presets) return state;
+    const preset = def.presets[presetIndex]; if (!preset) return state;
+    return { activeProps: { ...state.activeProps, [propId]: { ...prop, currentDims: { ...preset.dims } } } };
+  }),
 
-      const newProps = { ...state.activeProps };
-      const removedMeshIds: string[] = [];
+  setPropSlider: (propId, value) => set((state) => {
+    const prop = state.activeProps[propId]; if (!prop) return state;
+    const newDims = { ...prop.currentDims }; newDims.h = value;
+    return { activeProps: { ...state.activeProps, [propId]: { ...prop, currentDims: newDims } } };
+  }),
 
-      if (newProps[propId]) {
-        // Turning OFF — also remove any active children of this prop
-        delete newProps[propId];
-        removedMeshIds.push(`${propId}-prop`);
-        REFERENCE_PROP_DEFS.filter((d) => d.parent === propId).forEach((child) => {
-          if (newProps[child.id]) {
-            delete newProps[child.id];
-            removedMeshIds.push(`${child.id}-prop`);
-          }
-        });
-      } else {
-        // Turning ON — ensure the parent is active first, then this prop
-        const addProp = (d: ReferencePropDef) => {
-          if (newProps[d.id]) return;
-          const count = Object.keys(newProps).length;
-          newProps[d.id] = {
-            defId: d.id,
-            visible: true,
-            currentDims: { ...d.defaultDims },
-            position: getDefaultPosition(count),
-            rotation: euler(0, 0, 0),
-            labelText: d.name,
-            showLabel: true,
-          };
-        };
-        if (def.parent) {
-          const parentDef = REFERENCE_PROP_DEFS.find((d) => d.id === def.parent);
-          if (parentDef) addProp(parentDef);
-        }
-        addProp(def);
-      }
+  addCustomProp: (prop) => set((state) => {
+    const id = `custom-${Date.now()}`;
+    const count = state.customProps.length;
+    return { customProps: [...state.customProps, { ...prop, id, visible: true,
+      position: getDefaultPosition(count + Object.keys(state.activeProps).length),
+      rotation: euler(0,0,0), labelText: prop.name, showLabel: true, stackMode: false, material: '' }] };
+  }),
 
-      return {
-        activeProps: newProps,
-        selectedObjectIds: state.selectedObjectIds.filter((id) => !removedMeshIds.includes(id)),
-        lockedIds: state.lockedIds.filter((id) => !removedMeshIds.includes(id)),
-      };
-    }),
-
-  setPropPreset: (propId, presetIndex) =>
-    set((state) => {
-      const prop = state.activeProps[propId];
-      if (!prop) return state;
-      const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId);
-      if (!def || !def.presets) return state;
-      const preset = def.presets[presetIndex];
-      if (!preset) return state;
-      return {
-        activeProps: {
-          ...state.activeProps,
-          [propId]: { ...prop, currentDims: { ...preset.dims } },
-        },
-      };
-    }),
-
-  setPropSlider: (propId, value) =>
-    set((state) => {
-      const prop = state.activeProps[propId];
-      if (!prop) return state;
-      const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId);
-      if (!def) return state;
-      const newDims = { ...prop.currentDims };
-      if (propId === 'desk') {
-        newDims.h = value;
-      } else if (def.defaultShape === 'cylinder') {
-        newDims.h = value;
-      } else {
-        newDims.h = value;
-      }
-      return {
-        activeProps: {
-          ...state.activeProps,
-          [propId]: { ...prop, currentDims: newDims },
-        },
-      };
-    }),
-
-  addCustomProp: (prop) =>
-    set((state) => {
-      const id = `custom-${Date.now()}`;
-      const count = state.customProps.length;
-      return {
-        customProps: [
-          ...state.customProps,
-          {
-            ...prop,
-            id,
-            visible: true,
-            position: getDefaultPosition(count + Object.keys(state.activeProps).length),
-            rotation: euler(0, 0, 0),
-            labelText: prop.name,
-            showLabel: true,
-          },
-        ],
-      };
-    }),
-
-  removeCustomProp: (id) =>
-    set((state) => ({
-      customProps: state.customProps.filter((p) => p.id !== id),
-    })),
-
-  toggleCustomProp: (id) =>
-    set((state) => ({
-      customProps: state.customProps.map((p) =>
-        p.id === id ? { ...p, visible: !p.visible } : p
-      ),
-    })),
+  removeCustomProp: (id) => set((state) => ({ customProps: state.customProps.filter((p) => p.id !== id) })),
+  toggleCustomProp: (id) => set((state) => ({ customProps: state.customProps.map((p) => p.id === id ? { ...p, visible: !p.visible } : p) })),
 
   setOverlayImage: (url) => set({ overlayImage: url }),
   setOverlayOpacity: (opacity) => set({ overlayOpacity: opacity }),
   setMatchMode: (active) => set({ matchMode: active }),
-
-  setCameraPreset: (preset) =>
-    set({ cameraPreset: preset, cameraMode: 'preset' }),
-
+  setCameraPreset: (preset) => set({ cameraPreset: preset, cameraMode: 'preset' }),
+  setCameraAnglePreset: (preset) => set({ cameraAnglePreset: preset, cameraMode: 'preset' }),
   setCameraMode: (mode) => set({ cameraMode: mode }),
-
   setFov: (fov) => set({ fov }),
   toggleGrid: () => set((state) => ({ gridEnabled: !state.gridEnabled })),
   setGridSpacing: (spacing) => set({ gridSpacing: spacing }),
   toggleRuler: () => set((state) => ({ rulerEnabled: !state.rulerEnabled })),
   setCompareMode: (mode) => set({ compareMode: mode }),
-
   selectObject: (id) => set({ selectedObjectIds: id ? [id] : [] }),
+  toggleObjectSelection: (id) => set((state) => {
+    const exists = state.selectedObjectIds.includes(id);
+    if (exists) return { selectedObjectIds: state.selectedObjectIds.filter((oid) => oid !== id) };
+    return { selectedObjectIds: [...state.selectedObjectIds, id] };
+  }),
+  toggleObjectLock: (id) => set((state) => ({ lockedIds: state.lockedIds.includes(id) ? state.lockedIds.filter((x) => x !== id) : [...state.lockedIds, id] })),
 
-  toggleObjectSelection: (id) =>
-    set((state) => {
-      const exists = state.selectedObjectIds.includes(id);
-      if (exists) {
-        return { selectedObjectIds: state.selectedObjectIds.filter((oid) => oid !== id) };
-      }
-      return { selectedObjectIds: [...state.selectedObjectIds, id] };
-    }),
+  setObjectLabel: (id, text) => set((state) => {
+    if (id.endsWith('-prop')) { const propId = id.slice(0, -5); const prop = state.activeProps[propId]; if (!prop) return state; return { activeProps: { ...state.activeProps, [propId]: { ...prop, labelText: text } } }; }
+    const custom = state.customProps.find((p) => p.id === id); if (custom) return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, labelText: text } : p)) };
+    return state;
+  }),
 
-  toggleObjectLock: (id) =>
-    set((state) => ({
-      lockedIds: state.lockedIds.includes(id)
-        ? state.lockedIds.filter((x) => x !== id)
-        : [...state.lockedIds, id],
-    })),
+  toggleObjectLabel: (id) => set((state) => {
+    if (id.endsWith('-prop')) { const propId = id.slice(0, -5); const prop = state.activeProps[propId]; if (!prop) return state; return { activeProps: { ...state.activeProps, [propId]: { ...prop, showLabel: !prop.showLabel } } }; }
+    const custom = state.customProps.find((p) => p.id === id); if (custom) return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, showLabel: !p.showLabel } : p)) };
+    return state;
+  }),
 
-  setObjectLabel: (id, text) =>
-    set((state) => {
-      if (id.endsWith('-prop')) {
-        const propId = id.slice(0, -'-prop'.length);
-        const prop = state.activeProps[propId];
-        if (!prop) return state;
-        return { activeProps: { ...state.activeProps, [propId]: { ...prop, labelText: text } } };
-      }
-      const custom = state.customProps.find((p) => p.id === id);
-      if (custom) {
-        return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, labelText: text } : p)) };
-      }
-      return state; // device labels are fixed
-    }),
+  setObjectMaterial: (id, material) => set((state) => {
+    if (id === 'prime-charger') return { prime: { ...state.prime, material } };
+    if (id === 'prime-holder') return { prime: { ...state.prime, material } };
+    if (id === 'mid-charger') return { mid: { ...state.mid, material } };
+    if (id === 'mid-holder') return { mid: { ...state.mid, material } };
+    if (id === 'one-body') return { one: { ...state.one, material } };
+    if (id.endsWith('-prop')) { const propId = id.slice(0, -5); const prop = state.activeProps[propId]; if (!prop) return state; return { activeProps: { ...state.activeProps, [propId]: { ...prop, material } } }; }
+    const custom = state.customProps.find((p) => p.id === id); if (custom) return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, material } : p)) };
+    return state;
+  }),
 
-  toggleObjectLabel: (id) =>
-    set((state) => {
-      if (id.endsWith('-prop')) {
-        const propId = id.slice(0, -'-prop'.length);
-        const prop = state.activeProps[propId];
-        if (!prop) return state;
-        return { activeProps: { ...state.activeProps, [propId]: { ...prop, showLabel: !prop.showLabel } } };
-      }
-      const custom = state.customProps.find((p) => p.id === id);
-      if (custom) {
-        return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, showLabel: !p.showLabel } : p)) };
-      }
-      return state; // device labels cannot be deleted
-    }),
+  setObjectStackMode: (id, stackMode) => set((state) => {
+    if (id === 'prime-charger') return { prime: { ...state.prime, stackMode } };
+    if (id === 'prime-holder') return { prime: { ...state.prime, stackMode } };
+    if (id === 'mid-charger') return { mid: { ...state.mid, stackMode } };
+    if (id === 'mid-holder') return { mid: { ...state.mid, stackMode } };
+    if (id === 'one-body') return { one: { ...state.one, stackMode } };
+    if (id.endsWith('-prop')) { const propId = id.slice(0, -5); const prop = state.activeProps[propId]; if (!prop) return state; return { activeProps: { ...state.activeProps, [propId]: { ...prop, stackMode } } }; }
+    const custom = state.customProps.find((p) => p.id === id); if (custom) return { customProps: state.customProps.map((p) => (p.id === id ? { ...p, stackMode } : p)) };
+    return state;
+  }),
 
-  updateObjectPosition: (id, position) =>
-    set((state) => {
-      // Check if it's a device
-      if (id === 'prime-charger') return { prime: { ...state.prime, chargerPosition: position } };
-      if (id === 'prime-holder') return { prime: { ...state.prime, holderPosition: position } };
-      if (id === 'mid-charger') return { mid: { ...state.mid, chargerPosition: position } };
-      if (id === 'mid-holder') return { mid: { ...state.mid, holderPosition: position } };
-      if (id === 'one-body') return { one: { ...state.one, position } };
+  snapToStack: (id) => set((state) => {
+    const objects: Array<{ id: string; position: Vector3Data; rotation: EulerData; shape: 'cuboid' | 'cylinder'; dims: { h: number; w?: number; d?: number; diameter?: number }; visible: boolean }> = [];
+    if (state.prime.visible && state.prime.chargerVisible) { const spec = DEVICE_SPECS.find((d) => d.id === 'prime')!; objects.push({ id: 'prime-charger', position: state.prime.chargerPosition, rotation: state.prime.chargerRotation, shape: 'cuboid', dims: { h: spec.charger!.height, w: spec.charger!.width, d: spec.charger!.depth }, visible: true }); }
+    if (state.prime.visible && state.prime.holderVisible) { const spec = DEVICE_SPECS.find((d) => d.id === 'prime')!; objects.push({ id: 'prime-holder', position: state.prime.holderPosition, rotation: state.prime.holderRotation, shape: 'cylinder', dims: { h: spec.holder!.height, diameter: spec.holder!.depth }, visible: true }); }
+    if (state.mid.visible && state.mid.chargerVisible) { const spec = DEVICE_SPECS.find((d) => d.id === 'mid')!; objects.push({ id: 'mid-charger', position: state.mid.chargerPosition, rotation: state.mid.chargerRotation, shape: 'cuboid', dims: { h: spec.charger!.height, w: spec.charger!.width, d: spec.charger!.depth }, visible: true }); }
+    if (state.mid.visible && state.mid.holderVisible) { const spec = DEVICE_SPECS.find((d) => d.id === 'mid')!; objects.push({ id: 'mid-holder', position: state.mid.holderPosition, rotation: state.mid.holderRotation, shape: 'cylinder', dims: { h: spec.holder!.height, diameter: spec.holder!.depth }, visible: true }); }
+    if (state.one.visible) { const spec = DEVICE_SPECS.find((d) => d.id === 'one')!; objects.push({ id: 'one-body', position: state.one.position, rotation: state.one.rotation, shape: 'cuboid', dims: { h: spec.body!.height, w: spec.body!.width, d: spec.body!.depth }, visible: true }); }
+    Object.entries(state.activeProps).forEach(([propId, prop]) => { const def = REFERENCE_PROP_DEFS.find((d) => d.id === propId); if (!def || !prop.visible) return; objects.push({ id: `${propId}-prop`, position: prop.position, rotation: prop.rotation, shape: def.defaultShape, dims: prop.currentDims, visible: true }); });
+    state.customProps.forEach((prop) => { if (!prop.visible) return; objects.push({ id: prop.id, position: prop.position, rotation: prop.rotation, shape: prop.shape, dims: prop.dims, visible: true }); });
 
-      // Check custom props
-      const customIndex = state.customProps.findIndex((p) => p.id === id);
-      if (customIndex >= 0) {
-        const newCustoms = [...state.customProps];
-        newCustoms[customIndex] = { ...newCustoms[customIndex], position };
-        return { customProps: newCustoms };
-      }
+    let myObj = objects.find((o) => o.id === id); if (!myObj) return state;
+    let stackMode = false;
+    if (id === 'prime-charger') stackMode = state.prime.stackMode;
+    else if (id === 'prime-holder') stackMode = state.prime.stackMode;
+    else if (id === 'mid-charger') stackMode = state.mid.stackMode;
+    else if (id === 'mid-holder') stackMode = state.mid.stackMode;
+    else if (id === 'one-body') stackMode = state.one.stackMode;
+    else if (id.endsWith('-prop')) { const propId = id.slice(0, -5); stackMode = state.activeProps[propId]?.stackMode ?? false; }
+    else { const custom = state.customProps.find((p) => p.id === id); stackMode = custom?.stackMode ?? false; }
+    if (!stackMode) return state;
+    const stackedY = computeStackedY(id, myObj.position, myObj.shape, myObj.dims, myObj.rotation, objects);
+    if (stackedY <= 0) return state;
 
-      // Check active props
-      const propKey = Object.keys(state.activeProps).find((key) => `${key}-prop` === id);
-      if (propKey) {
-        return {
-          activeProps: {
-            ...state.activeProps,
-            [propKey]: { ...state.activeProps[propKey], position },
-          },
-        };
-      }
-
-      return state;
-    }),
-
-  updateObjectRotation: (id, rotation) =>
-    set((state) => {
-      if (id === 'prime-charger') return { prime: { ...state.prime, chargerRotation: rotation } };
-      if (id === 'prime-holder') return { prime: { ...state.prime, holderRotation: rotation } };
-      if (id === 'mid-charger') return { mid: { ...state.mid, chargerRotation: rotation } };
-      if (id === 'mid-holder') return { mid: { ...state.mid, holderRotation: rotation } };
-      if (id === 'one-body') return { one: { ...state.one, rotation } };
-
-      const customIndex = state.customProps.findIndex((p) => p.id === id);
-      if (customIndex >= 0) {
-        const newCustoms = [...state.customProps];
-        newCustoms[customIndex] = { ...newCustoms[customIndex], rotation };
-        return { customProps: newCustoms };
-      }
-
-      const propKey = Object.keys(state.activeProps).find((key) => `${key}-prop` === id);
-      if (propKey) {
-        return {
-          activeProps: {
-            ...state.activeProps,
-            [propKey]: { ...state.activeProps[propKey], rotation },
-          },
-        };
-      }
-
-      return state;
-    }),
+    if (id === 'prime-charger') return { prime: { ...state.prime, chargerPosition: { ...state.prime.chargerPosition, y: stackedY } } };
+    if (id === 'prime-holder') return { prime: { ...state.prime, holderPosition: { ...state.prime.holderPosition, y: stackedY } } };
+    if (id === 'mid-charger') return { mid: { ...state.mid, chargerPosition: { ...state.mid.chargerPosition, y: stackedY } } };
+    if (id === 'mid-holder') return { mid: { ...state.mid, holderPosition: { ...state.mid.holderPosition, y: stackedY } } };
+    if (id === 'one-body') return { one: { ...state.one, position: { ...state.one.position, y: stackedY } } };
+    if (id.endsWith('-prop')) { const propId = id.slice(0, -5); const prop = state.activeProps[propId]; if (!prop) return state; return { activeProps: { ...state.activeProps, [propId]: { ...prop, position: { ...prop.position, y: stackedY } } } }; }
+    const customIndex = state.customProps.findIndex((p) => p.id === id); if (customIndex >= 0) { const newCustoms = [...state.customProps]; newCustoms[customIndex] = { ...newCustoms[customIndex], position: { ...newCustoms[customIndex].position, y: stackedY } }; return { customProps: newCustoms }; }
+    return state;
+  }),
 
   lockCamera: (locked) => set({ cameraLocked: locked }),
   setCalibrationDepth: (depth) => set({ calibrationDepth: depth }),
-
-  resetScene: () =>
-    set({
-      prime: { ...defaultModular },
-      mid: { ...defaultModular },
-      one: { ...defaultOne },
-      activeProps: {},
-      customProps: [],
-      selectedObjectIds: [],
-      lockedIds: [],
-    }),
+  toggleCropGuides: () => set((state) => ({ cropGuidesEnabled: !state.cropGuidesEnabled })),
+  resetScene: () => set({ prime: { ...defaultModular }, mid: { ...defaultModular }, one: { ...defaultOne }, activeProps: {}, customProps: [], selectedObjectIds: [], lockedIds: [], cropGuidesEnabled: false }),
 }));
