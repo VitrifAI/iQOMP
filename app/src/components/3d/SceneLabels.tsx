@@ -5,8 +5,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { DEVICE_SPECS, REFERENCE_PROP_DEFS, MM_TO_UNIT, meshDisplayName } from '@/types';
 import type { EulerData } from '@/types';
 
-const DEVICE_SIZE = 6.5;
-const PROP_SIZE = 4.2;
+const DEVICE_SIZE = 1.8;
+const PROP_SIZE = 1.3;
 const DEVICE_COLOR = '#FFFFFF';
 const PROP_COLOR = '#E6E6EC';
 const MATERIAL_COLOR = '#9FE3C0';
